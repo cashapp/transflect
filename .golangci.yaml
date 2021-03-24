@@ -1,0 +1,38 @@
+issues:
+  exclude-use-default: false
+  exclude:
+    # Captured by errcheck.
+    - '^(G104|G204|G307):'
+    # Very commonly not checked.
+    - 'Error return value of .(.*Close|os\.Remove(All)?|.*Print(f|ln|)|os\.(Un)?Setenv). is not checked'
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+      text: 'G304'
+
+linters:
+  enable-all: true
+  disable:
+    - exhaustivestruct
+    - forbidigo
+    - funlen
+    - gochecknoglobals
+    - goconst
+    - goerr113
+    - golint
+    - gomnd
+    - interfacer
+    - lll
+    - maligned
+    - nlreturn
+    - paralleltest
+    - scopelint
+    - testpackage
+    - wsl
+
+linters-settings:
+  godox:
+    keywords:
+      - BUG
+      - FIXME

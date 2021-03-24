@@ -1,0 +1,13 @@
+dist: out/dist
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    main: ./cmd/transflect
+checksum:
+  name_template: 'checksums.txt'
+changelog:
+  sort: desc
