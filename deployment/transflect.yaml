@@ -33,6 +33,7 @@ spec:
       automountServiceAccountToken: true
       containers:
         - name: transflect
+          # image: transflect/transflect # Use image from Dockerhub
           image: k3d-registry.transflect.local:420/transflect:latest
           imagePullPolicy: Always
 ---

@@ -172,10 +172,15 @@ docker-build-push:
 # --- Release -------------------------------------------------------------------
 NEXTTAG := $(shell { git tag --list --merged HEAD --sort=-v:refname; echo v0.0.0; } | grep -E "^v?[0-9]+.[0-9]+.[0-9]+$$" | head -n1 | awk -F . '{ print $$1 "." $$2 "." $$3 + 1 }')
 
+DOCKER_LOGIN = printenv DOCKER_PASSWORD | docker login --username "$(DOCKER_USERNAME)" --password-stdin
+
+release: REGISTRY = cashapp
 release:
 	git tag $(NEXTTAG)
 	git push origin $(NEXTTAG)
 	goreleaser release --rm-dist
+	[ -z "$(DOCKER_PASSWORD)" ] || $(DOCKER_LOGIN)
+	$(DOCKER_PUSH_CMD)
 
 .PHONY: release
 
