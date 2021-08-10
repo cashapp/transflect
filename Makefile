@@ -151,7 +151,7 @@ lint:  ## Lint go source code
 
 shellcheck:
 	shellcheck *.sh
-	shfmt --i 4 -d *.sh
+	shfmt -i 4 -d *.sh
 
 .PHONY: lint shellcheck
 
