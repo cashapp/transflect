@@ -167,6 +167,7 @@ DOCKER_PUSH_CMD = docker buildx build \
 docker-build-push:
 	$(DOCKER_PUSH_CMD)
 
+.PHONY: docker-build-push
 
 # --- Release -------------------------------------------------------------------
 NEXTTAG := $(shell { git tag --list --merged HEAD --sort=-v:refname; echo v0.0.0; } | grep -E "^v?[0-9]+.[0-9]+.[0-9]+$$" | head -n1 | awk -F . '{ print $$1 "." $$2 "." $$3 + 1 }')
