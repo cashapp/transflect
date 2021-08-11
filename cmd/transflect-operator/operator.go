@@ -287,6 +287,7 @@ func (o *operator) processFilter(rs *appsv1.ReplicaSet) error {
 	port := grpcPort(rs)
 	if port == 0 {
 		if err := o.deleteFilter(context.Background(), rs); err != nil {
+			// TODO fix for is not exist, remove from active state and deployment locker.
 			return err
 		}
 		o.activeState.Delete(deployKey)
