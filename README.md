@@ -91,6 +91,9 @@ You will need transflect running in your cluster for the annotation to
 have an effect. See [deployment/transflect.yaml](deployment/transflect.yaml)
 for a sample transflect Deployment used in integration tests.
 
+You can pull the pre-built [transflect docker image](https://hub.docker.com/r/cashapp/transflect)
+from Dockerhub with `docker pull cashapp/transflect`.
+
 ## Local development
 
 _Pre-requisites:_ git, curl, docker (tested with version 20.10). Other
