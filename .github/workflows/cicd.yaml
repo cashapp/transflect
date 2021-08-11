@@ -24,6 +24,8 @@ jobs:
     - run: make release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
   slack-on-fail:
     runs-on: ubuntu-latest
