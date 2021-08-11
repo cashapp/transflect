@@ -175,6 +175,7 @@ NEXTTAG := $(shell { git tag --list --merged HEAD --sort=-v:refname; echo v0.0.0
 DOCKER_LOGIN = printenv DOCKER_PASSWORD | docker login --username "$(DOCKER_USERNAME)" --password-stdin
 
 release: REGISTRY = cashapp
+release: VERSION = $(NEXTTAG)
 release:
 	git tag $(NEXTTAG)
 	git push origin $(NEXTTAG)
