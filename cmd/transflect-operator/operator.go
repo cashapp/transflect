@@ -15,6 +15,7 @@ import (
 	istionet "istio.io/client-go/pkg/apis/networking/v1alpha3"
 	istio "istio.io/client-go/pkg/clientset/versioned/typed/networking/v1alpha3"
 	appsv1 "k8s.io/api/apps/v1"
+	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	informerv1 "k8s.io/client-go/informers/apps/v1"
@@ -39,7 +40,9 @@ type operator struct {
 	// to update the EnvoyFilter on port annotation change.
 	//
 	// 	    activeState[deploymentKey] = { revision, grpcPort }
-	activeState      sync.Map
+	activeState sync.Map
+	// serialise all operations on a deployment,
+	// so that no concurrent operations on a single deployment are possible
 	deploymentLocker mutexMap
 
 	useIngress bool
@@ -287,8 +290,10 @@ func (o *operator) processFilter(rs *appsv1.ReplicaSet) error {
 	port := grpcPort(rs)
 	if port == 0 {
 		if err := o.deleteFilter(context.Background(), rs); err != nil {
-			// TODO fix for is not exist, remove from active state and deployment locker.
-			return err
+			if !k8errors.IsNotFound(err) {
+				return err
+			}
+			log.Warn().Err(err).Str("replica", rs.Name).Msg("Cannot delete EnvoyFilter because it cannot be found")
 		}
 		o.activeState.Delete(deployKey)
 		o.deploymentLocker.delete(deployKey)
