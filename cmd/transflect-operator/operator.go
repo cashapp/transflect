@@ -39,7 +39,9 @@ type operator struct {
 	// to update the EnvoyFilter on port annotation change.
 	//
 	// 	    activeState[deploymentKey] = { revision, grpcPort }
-	activeState      sync.Map
+	activeState sync.Map
+	// serialise all operations on a deployment,
+	// so that no concurrent operations on a single deployment are possible
 	deploymentLocker mutexMap
 
 	useIngress bool
