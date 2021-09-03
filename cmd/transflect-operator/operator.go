@@ -62,11 +62,13 @@ func newOperator(cfg *config) (*operator, error) {
 		return nil, err
 	}
 
-	rsInformer := informers.NewSharedInformerFactory(k8s, time.Second*30).Apps().V1().ReplicaSets()
+	informerFactory := informers.NewSharedInformerFactory(k8s, time.Second*30)
+
+	rsInformer := informerFactory.Apps().V1().ReplicaSets()
 	if err := rsInformer.Informer().SetWatchErrorHandler(watchErrorHandler); err != nil {
 		return nil, errors.Wrap(err, "cannot add custom error handler to replicaset informer")
 	}
-	deployInformer := informers.NewSharedInformerFactory(k8s, time.Second*30).Apps().V1().Deployments()
+	deployInformer := informerFactory.Apps().V1().Deployments()
 	if err := deployInformer.Informer().SetWatchErrorHandler(watchErrorHandler); err != nil {
 		return nil, errors.Wrap(err, "cannot add custom error handler to deployment informer")
 	}
@@ -108,6 +110,7 @@ func (o *operator) start() error {
 	log.Debug().Msg("Starting: informer event handlers registered")
 	o.runWorkers(42)
 	o.rsInformer.Informer().Run(o.stopper)
+	o.deployInformer.Informer().Run(o.stopper)
 
 	// When run finishes e.g. because of signal calling o.stop():
 	log.Debug().Msg("Shutting down queue")
