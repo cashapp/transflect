@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cashapp/transflect/pkg/transflect"
 	"github.com/jpillora/backoff"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -41,9 +42,10 @@ type operator struct {
 	//
 	// 	    activeState[deploymentKey] = { revision, grpcPort }
 	activeState sync.Map
+
 	// serialise all operations on a deployment,
 	// so that no concurrent operations on a single deployment are possible
-	deploymentLocker mutexMap
+	deploymentLocker transflect.MutexMap
 
 	useIngress bool
 	plaintext  bool
@@ -195,7 +197,7 @@ func (o *operator) cleanupDeployment(v interface{}) {
 		return
 	}
 	o.activeState.Delete(key)
-	o.deploymentLocker.delete(key)
+	o.deploymentLocker.Remove(key)
 }
 
 func (o *operator) candidateKey(rs *appsv1.ReplicaSet) (string, bool) {
@@ -229,6 +231,7 @@ func (o *operator) isCandidate(rs *appsv1.ReplicaSet) bool {
 		if revision < active.revision {
 			return false
 		}
+		// if not performed under deployment lock, there's a raise condition here.
 		if revision == active.revision && port == active.grpcPort {
 			return false
 		}
@@ -288,8 +291,8 @@ func (o *operator) next() bool {
 func (o *operator) processFilter(rs *appsv1.ReplicaSet) error {
 	deployKey, _ := getDeploymentKey(rs)
 	revision := deployRevision(rs)
-	o.deploymentLocker.lock(deployKey)
-	defer o.deploymentLocker.unlock(deployKey)
+	o.deploymentLocker.Lock(deployKey)
+	defer o.deploymentLocker.Unlock(deployKey)
 	port := grpcPort(rs)
 	if port == 0 {
 		if err := o.deleteFilter(context.Background(), rs); err != nil {
@@ -299,7 +302,7 @@ func (o *operator) processFilter(rs *appsv1.ReplicaSet) error {
 			log.Warn().Err(err).Str("replica", rs.Name).Msg("Cannot delete EnvoyFilter because it cannot be found")
 		}
 		o.activeState.Delete(deployKey)
-		o.deploymentLocker.delete(deployKey)
+		o.deploymentLocker.Remove(deployKey)
 		return nil
 	}
 
