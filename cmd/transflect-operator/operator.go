@@ -176,13 +176,26 @@ func (o *operator) enqueue(v interface{}) {
 		log.Error().Interface("object", v).Msg("Cannot convert object to Replicaset for enqueueing")
 		return
 	}
-	if key, ok := o.candidateKey(rs); ok {
-		o.queue.Add(key)
+	if !shouldEnqueue(rs) {
+		return
 	}
+	key, _ := cache.MetaNamespaceKeyFunc(rs)
+	o.queue.Add(key)
 }
 
 func (o *operator) enqueueWithOld(_, v interface{}) {
 	o.enqueue(v)
+}
+
+func shouldEnqueue(rs *appsv1.ReplicaSet) bool {
+	if rs.Status.ReadyReplicas == 0 {
+		return false
+	}
+	if _, ok := getDeploymentKey(rs); !ok {
+		log.Debug().Str("replica", rs.Name).Msg("Replicaset does not have deployment owner")
+		return false
+	}
+	return true
 }
 
 func (o *operator) cleanupDeployment(v interface{}) {
@@ -198,50 +211,6 @@ func (o *operator) cleanupDeployment(v interface{}) {
 	}
 	o.activeState.Delete(key)
 	o.deploymentLocker.Remove(key)
-}
-
-func (o *operator) candidateKey(rs *appsv1.ReplicaSet) (string, bool) {
-	if !o.isCandidate(rs) {
-		return "", false
-	}
-	rsKey, _ := cache.MetaNamespaceKeyFunc(rs)
-	return rsKey, true
-}
-
-func (o *operator) isCandidate(rs *appsv1.ReplicaSet) bool {
-	if rs.Status.ReadyReplicas == 0 {
-		return false
-	}
-	deployKey, ok := getDeploymentKey(rs)
-	if !ok {
-		log.Error().Str("replica", rs.Name).Msg("Cannot get deployment Key for candidate evaluation")
-		return false
-	}
-	port := grpcPort(rs)
-	v, existing := o.activeState.Load(deployKey)
-	if existing {
-		active, _ := v.(activeEntry)
-		// Ignore candidate if we have an existing filter but the candidate is
-		// old or has not changed the port.
-		revision := deployRevision(rs)
-		if revision == 0 {
-			log.Error().Str("replica", rs.Name).Msg("Cannot get revision annotation for candidate evaluation")
-			return false
-		}
-		if revision < active.revision {
-			return false
-		}
-		// if not performed under deployment lock, there's a raise condition here.
-		if revision == active.revision && port == active.grpcPort {
-			return false
-		}
-	}
-	if !existing && port == 0 {
-		// No existing record, so nothing to do if not annotated
-		return false
-	}
-	// Upsert or delete EnvoyFilter for Replicaset
-	return true
 }
 
 func (o *operator) runWorkers(cnt int) {
@@ -279,9 +248,6 @@ func (o *operator) next() bool {
 		log.Error().Err(err).Msg("Cannot get next queued Replicaset")
 		return true
 	}
-	if !o.isCandidate(rs) {
-		return true
-	}
 	if err := o.processFilter(rs); err != nil {
 		log.Error().Err(err).Str("replica", rs.Name).Msg("Cannot process EnvoyFilter for Replicaset")
 	}
@@ -290,9 +256,11 @@ func (o *operator) next() bool {
 
 func (o *operator) processFilter(rs *appsv1.ReplicaSet) error {
 	deployKey, _ := getDeploymentKey(rs)
-	revision := deployRevision(rs)
 	o.deploymentLocker.Lock(deployKey)
 	defer o.deploymentLocker.Unlock(deployKey)
+	if !o.shouldProcess(rs) {
+		return nil
+	}
 	port := grpcPort(rs)
 	if port == 0 {
 		if err := o.deleteFilter(context.Background(), rs); err != nil {
@@ -309,9 +277,43 @@ func (o *operator) processFilter(rs *appsv1.ReplicaSet) error {
 	if err := o.upsertFilter(context.Background(), rs); err != nil {
 		return err
 	}
+	revision := deployRevision(rs)
 	active := activeEntry{grpcPort: port, revision: revision}
 	o.activeState.Store(deployKey, active)
 	return nil
+}
+
+func (o *operator) shouldProcess(rs *appsv1.ReplicaSet) bool {
+	if rs.Status.ReadyReplicas == 0 {
+		return false
+	}
+	deployKey, _ := getDeploymentKey(rs)
+	port := grpcPort(rs)
+	v, existing := o.activeState.Load(deployKey)
+	if existing {
+		active, _ := v.(activeEntry)
+		// Ignore candidate if we have an existing filter but the candidate is
+		// old or has not changed the port.
+		revision := deployRevision(rs)
+		if revision == 0 {
+			log.Error().Str("replica", rs.Name).Msg("Cannot get revision annotation for candidate evaluation")
+			return false
+		}
+		if revision < active.revision {
+			return false
+		}
+		// Potential race condition if not performed under deployment
+		// lock and port is changed several times in a short period of time.
+		if revision == active.revision && port == active.grpcPort {
+			return false
+		}
+	}
+	if !existing && port == 0 {
+		// No existing record, so nothing to do if not annotated
+		return false
+	}
+	// Upsert or delete EnvoyFilter for Replicaset
+	return true
 }
 
 func (o *operator) getReplicaset(key string) (*appsv1.ReplicaSet, error) {
