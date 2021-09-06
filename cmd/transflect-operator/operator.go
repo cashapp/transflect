@@ -76,10 +76,6 @@ func newOperator(cfg *config) (*operator, error) {
 	return op, nil
 }
 
-func watchErrorHandler(_ *cache.Reflector, err error) {
-	log.Debug().Err(err).Msg("ListAndWatch dropped the connection with an error, back-off and retry")
-}
-
 func (o *operator) start() error {
 	// Initialise activeState for existing transflect EnvoyFilters
 	// to determine if EnvoyFilter upsert should be processed.
@@ -121,56 +117,6 @@ func (o *operator) start() error {
 	return nil
 }
 
-func (o *operator) syncActive() error {
-	opts := metav1.ListOptions{
-		LabelSelector: "app=transflect",
-		Limit:         42,
-	}
-	b := backoff.Backoff{Min: 2 * time.Second}
-	ctx := context.Background()
-	for {
-		list, err := o.istio.EnvoyFilters("").List(ctx, opts)
-		if err != nil {
-			if int(b.Attempt()) > 10 {
-				return fmt.Errorf("cannot list existing EnvoyFilters to sync active state, ran out of attempts")
-			}
-			time.Sleep(b.Duration())
-			continue
-		}
-		b.Reset()
-		for _, filter := range list.Items {
-			key, entry, err := getActiveEntry(filter)
-			if err != nil {
-				log.Error().Err(err).Str("envoyfilter", filter.Name).Msg("Cannot be synced")
-				continue
-			}
-			o.activeState.Store(key, entry)
-			log.Debug().Str("deploymentKey", key).Int("revision", entry.revision).Uint32("port", entry.grpcPort).Msg("synced active state")
-		}
-		if opts.Continue == "" {
-			return nil
-		}
-	}
-}
-
-func getActiveEntry(filter istionet.EnvoyFilter) (string, activeEntry, error) {
-	a := filter.Annotations
-	key := a["transflect.cash.squareup.com/deployment"]
-	if key == "" {
-		return "", activeEntry{}, fmt.Errorf("cannot retrieve deployment key from existing EnvoyFilter")
-	}
-	port := grpcPortStr(filter.Annotations["transflect.cash.squareup.com/port"])
-	if port == 0 {
-		return "", activeEntry{}, fmt.Errorf("cannot retrieve grpc port from existing EnvoyFilter")
-	}
-	revision := deployRevisionStr(filter.Annotations["deployment.kubernetes.io/revision"])
-	if revision == 0 {
-		return "", activeEntry{}, fmt.Errorf("cannot retrieve deployment revision from existing EnvoyFilter")
-	}
-	entry := activeEntry{grpcPort: port, revision: revision}
-	return key, entry, nil
-}
-
 func (o *operator) enqueue(v interface{}) {
 	rs, ok := v.(*appsv1.ReplicaSet)
 	if !ok {
@@ -197,21 +143,6 @@ func shouldEnqueue(rs *appsv1.ReplicaSet) bool {
 		return false
 	}
 	return true
-}
-
-func (o *operator) cleanupDeployment(v interface{}) {
-	d, ok := v.(*appsv1.Deployment)
-	if !ok {
-		log.Error().Interface("object", v).Msg("Cannot convert object to Deployment for cleanup")
-		return
-	}
-	key, err := cache.MetaNamespaceKeyFunc(d)
-	if err != nil {
-		log.Error().Err(err).Str("deployment", d.Name).Msg("Cannot create deployment Key, skip EnvoyFilter cleanup")
-		return
-	}
-	o.activeState.Delete(key)
-	o.deploymentLocker.Remove(key)
 }
 
 func (o *operator) runWorkers(cnt int) {
@@ -317,35 +248,6 @@ func (o *operator) shouldProcess(rs *appsv1.ReplicaSet) bool {
 	return true
 }
 
-func (o *operator) getReplicaset(key string) (*appsv1.ReplicaSet, error) {
-	namespace, name, err := cache.SplitMetaNamespaceKey(key)
-	if err != nil {
-		return nil, errors.Wrapf(err, "invalid key format")
-	}
-	rs, err := o.rsInformer.Lister().ReplicaSets(namespace).Get(name)
-	if err != nil {
-		return nil, errors.Wrapf(err, "cannot GET replicaset %s", name)
-	}
-	return rs, nil
-}
-
-func getClientSets() (*kubernetes.Clientset, *istio.NetworkingV1alpha3Client, error) {
-	cfg, err := getConfig()
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "cannot get Kubernetes config")
-	}
-	k8s, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "cannot get Kubernetes ClientSet")
-	}
-
-	istioClient, err := istio.NewForConfig(cfg)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "cannot get Istio ClientSet")
-	}
-	return k8s, istioClient, nil
-}
-
 func grpcPort(rs *appsv1.ReplicaSet) uint32 {
 	return grpcPortStr(rs.Annotations["transflect.cash.squareup.com/port"])
 }
@@ -390,6 +292,35 @@ func getDeployment(rs *appsv1.ReplicaSet) (metav1.OwnerReference, bool) {
 	return metav1.OwnerReference{}, false
 }
 
+func (o *operator) getReplicaset(key string) (*appsv1.ReplicaSet, error) {
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return nil, errors.Wrapf(err, "invalid key format")
+	}
+	rs, err := o.rsInformer.Lister().ReplicaSets(namespace).Get(name)
+	if err != nil {
+		return nil, errors.Wrapf(err, "cannot GET replicaset %s", name)
+	}
+	return rs, nil
+}
+
+func getClientSets() (*kubernetes.Clientset, *istio.NetworkingV1alpha3Client, error) {
+	cfg, err := getConfig()
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "cannot get Kubernetes config")
+	}
+	k8s, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "cannot get Kubernetes ClientSet")
+	}
+
+	istioClient, err := istio.NewForConfig(cfg)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "cannot get Istio ClientSet")
+	}
+	return k8s, istioClient, nil
+}
+
 func getConfig() (*rest.Config, error) {
 	cfg, err := rest.InClusterConfig()
 	if err == nil {
@@ -412,4 +343,73 @@ func getConfig() (*rest.Config, error) {
 		return nil, errors.Wrap(err, "cannot find kube config")
 	}
 	return kubeCfg, nil
+}
+
+func watchErrorHandler(_ *cache.Reflector, err error) {
+	log.Debug().Err(err).Msg("ListAndWatch dropped the connection with an error, back-off and retry")
+}
+
+func (o *operator) syncActive() error {
+	opts := metav1.ListOptions{
+		LabelSelector: "app=transflect",
+		Limit:         42,
+	}
+	b := backoff.Backoff{Min: 2 * time.Second}
+	ctx := context.Background()
+	for {
+		list, err := o.istio.EnvoyFilters("").List(ctx, opts)
+		if err != nil {
+			if int(b.Attempt()) > 10 {
+				return fmt.Errorf("cannot list existing EnvoyFilters to sync active state, ran out of attempts")
+			}
+			time.Sleep(b.Duration())
+			continue
+		}
+		b.Reset()
+		for _, filter := range list.Items {
+			key, entry, err := getActiveEntry(filter)
+			if err != nil {
+				log.Error().Err(err).Str("envoyfilter", filter.Name).Msg("Cannot be synced")
+				continue
+			}
+			o.activeState.Store(key, entry)
+			log.Debug().Str("deploymentKey", key).Int("revision", entry.revision).Uint32("port", entry.grpcPort).Msg("synced active state")
+		}
+		if opts.Continue == "" {
+			return nil
+		}
+	}
+}
+
+func getActiveEntry(filter istionet.EnvoyFilter) (string, activeEntry, error) {
+	a := filter.Annotations
+	key := a["transflect.cash.squareup.com/deployment"]
+	if key == "" {
+		return "", activeEntry{}, fmt.Errorf("cannot retrieve deployment key from existing EnvoyFilter")
+	}
+	port := grpcPortStr(filter.Annotations["transflect.cash.squareup.com/port"])
+	if port == 0 {
+		return "", activeEntry{}, fmt.Errorf("cannot retrieve grpc port from existing EnvoyFilter")
+	}
+	revision := deployRevisionStr(filter.Annotations["deployment.kubernetes.io/revision"])
+	if revision == 0 {
+		return "", activeEntry{}, fmt.Errorf("cannot retrieve deployment revision from existing EnvoyFilter")
+	}
+	entry := activeEntry{grpcPort: port, revision: revision}
+	return key, entry, nil
+}
+
+func (o *operator) cleanupDeployment(v interface{}) {
+	d, ok := v.(*appsv1.Deployment)
+	if !ok {
+		log.Error().Interface("object", v).Msg("Cannot convert object to Deployment for cleanup")
+		return
+	}
+	key, err := cache.MetaNamespaceKeyFunc(d)
+	if err != nil {
+		log.Error().Err(err).Str("deployment", d.Name).Msg("Cannot create deployment Key, skip EnvoyFilter cleanup")
+		return
+	}
+	o.activeState.Delete(key)
+	o.deploymentLocker.Remove(key)
 }
