@@ -180,46 +180,23 @@ func (o *operator) next() bool {
 		log.Error().Err(err).Msg("Cannot get next queued Replicaset")
 		return true
 	}
-	if err := o.processFilter(rs); err != nil {
-		log.Error().Err(err).Str("replica", rs.Name).Msg("Cannot process EnvoyFilter for Replicaset")
+
+	deployKey, _ := getDeploymentKey(rs)
+	o.deploymentLocker.Lock(deployKey)
+	defer o.deploymentLocker.Unlock(deployKey)
+
+	if o.shouldProcessReplicaset(rs, deployKey) {
+		if err := o.processReplicaset(rs, deployKey); err != nil {
+			log.Error().Err(err).Str("replica", rs.Name).Msg("Cannot process EnvoyFilter for Replicaset")
+		}
 	}
 	return true
 }
 
-func (o *operator) processFilter(rs *appsv1.ReplicaSet) error {
-	deployKey, _ := getDeploymentKey(rs)
-	o.deploymentLocker.Lock(deployKey)
-	defer o.deploymentLocker.Unlock(deployKey)
-	if !o.shouldProcess(rs) {
-		return nil
-	}
-	port := grpcPort(rs)
-	if port == 0 {
-		if err := o.deleteFilter(context.Background(), rs); err != nil {
-			if !k8errors.IsNotFound(err) {
-				return err
-			}
-			log.Warn().Err(err).Str("replica", rs.Name).Msg("Cannot delete EnvoyFilter because it cannot be found")
-		}
-		o.activeState.Delete(deployKey)
-		o.deploymentLocker.Remove(deployKey)
-		return nil
-	}
-
-	if err := o.upsertFilter(context.Background(), rs); err != nil {
-		return err
-	}
-	revision := deployRevision(rs)
-	active := activeEntry{grpcPort: port, revision: revision}
-	o.activeState.Store(deployKey, active)
-	return nil
-}
-
-func (o *operator) shouldProcess(rs *appsv1.ReplicaSet) bool {
+func (o *operator) shouldProcessReplicaset(rs *appsv1.ReplicaSet, deployKey string) bool {
 	if rs.Status.ReadyReplicas == 0 {
 		return false
 	}
-	deployKey, _ := getDeploymentKey(rs)
 	port := grpcPort(rs)
 	v, existing := o.activeState.Load(deployKey)
 	if existing { // EnvoyFilter for given deployment exists
@@ -246,6 +223,29 @@ func (o *operator) shouldProcess(rs *appsv1.ReplicaSet) bool {
 	}
 	// Upsert or delete EnvoyFilter for Replicaset
 	return true
+}
+
+func (o *operator) processReplicaset(rs *appsv1.ReplicaSet, deployKey string) error {
+	port := grpcPort(rs)
+	if port == 0 {
+		if err := o.deleteFilter(context.Background(), rs); err != nil {
+			if !k8errors.IsNotFound(err) {
+				return err
+			}
+			log.Warn().Err(err).Str("replica", rs.Name).Msg("Cannot delete EnvoyFilter because it cannot be found")
+		}
+		o.activeState.Delete(deployKey)
+		o.deploymentLocker.Remove(deployKey)
+		return nil
+	}
+
+	if err := o.upsertFilter(context.Background(), rs); err != nil {
+		return err
+	}
+	revision := deployRevision(rs)
+	active := activeEntry{grpcPort: port, revision: revision}
+	o.activeState.Store(deployKey, active)
+	return nil
 }
 
 func grpcPort(rs *appsv1.ReplicaSet) uint32 {
