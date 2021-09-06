@@ -28,6 +28,7 @@ main() {
     attempts=25
 
     # Set up initial deployments and transflect
+    # kubectl create namespace transflect # make run-local-operator needs transflect namespace for lease lock
     kubectl apply -f deployment/transflect.yaml
     kubectl apply -f deployment/routeguide.yaml
     kubectl apply -f deployment/guppyecho.yaml

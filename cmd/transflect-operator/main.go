@@ -22,11 +22,12 @@ var (
 )
 
 type config struct {
-	UseIngress bool             `short:"i" help:"Create and use temporary ingress to access temporary service, e.g. from outside cluster"`
-	Address    string           `short:"a" help:"gRPC reflection server address, host:port"`
-	Plaintext  bool             `short:"p" help:"Use plain-text; no TLS"`
-	LogFormat  string           `help:"Log format ('json', 'std')" enum:"json,std" default:"std"`
-	Version    kong.VersionFlag `short:"v" help:"Print version information"`
+	UseIngress     bool             `short:"i" help:"Create and use temporary ingress to access temporary service, e.g. from outside cluster"`
+	Address        string           `short:"a" help:"gRPC reflection server address, host:port"`
+	Plaintext      bool             `short:"p" help:"Use plain-text; no TLS"`
+	LeaseNamespace string           `help:"Namespace in which leader election lease is created" default:"transflect"`
+	LogFormat      string           `help:"Log format ('json', 'std')" enum:"json,std" default:"std"`
+	Version        kong.VersionFlag `short:"v" help:"Print version information"`
 }
 
 func main() {
