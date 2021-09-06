@@ -42,50 +42,18 @@ kind: ClusterRole
 metadata:
   name: transflect
 rules:
-  - apiGroups:
-      - apps
-    resources:
-      - replicasets
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - apps
-    resources:
-      - deployment
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - ''
-    resources:
-      - services
-    verbs:
-      - create
-      - delete
-      - get
-      - update
-  - apiGroups:
-      - networking.k8s.io
-    resources:
-      - ingresses
-    verbs:
-      - create
-      - delete
-      - get
-      - update
-  - apiGroups:
-      - networking.istio.io
-    resources:
-      - envoyfilters
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - update
+  - apiGroups: [ apps ]
+    resources: [ replicasets, deployments ]
+    verbs:  [ get, list, watch ]
+  - apiGroups: [ '' ]
+    resources: [ services ]
+    verbs: [ create, delete, get, update ]
+  - apiGroups: [ networking.k8s.io ]
+    resources: [ ingresses ]
+    verbs: [ create, delete, get, update ]
+  - apiGroups: [ networking.istio.io ]
+    resources: [ envoyfilters ]
+    verbs: [ create, delete, get, list, update ]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
