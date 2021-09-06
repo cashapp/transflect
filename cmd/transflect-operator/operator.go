@@ -43,8 +43,8 @@ type operator struct {
 	// 	    activeState[deploymentKey] = { revision, grpcPort }
 	activeState sync.Map
 
-	// serialise all operations on a deployment,
-	// so that no concurrent operations on a single deployment are possible
+	// deploymentLocker synchronises operations on a deployment
+	// so that no two updates for a single deployment can run concurrently.
 	deploymentLocker transflect.MutexMap
 
 	useIngress bool
@@ -221,7 +221,7 @@ func (o *operator) runWorkers(cnt int) {
 }
 
 func (o *operator) runWorker() {
-	for o.next() {
+	for o.next() { // process next enqueued Replicaset
 	}
 	o.wg.Done()
 }
@@ -290,7 +290,7 @@ func (o *operator) shouldProcess(rs *appsv1.ReplicaSet) bool {
 	deployKey, _ := getDeploymentKey(rs)
 	port := grpcPort(rs)
 	v, existing := o.activeState.Load(deployKey)
-	if existing {
+	if existing { // EnvoyFilter for given deployment exists
 		active, _ := v.(activeEntry)
 		// Ignore candidate if we have an existing filter but the candidate is
 		// old or has not changed the port.
