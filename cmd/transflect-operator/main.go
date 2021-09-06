@@ -22,11 +22,12 @@ var (
 )
 
 type config struct {
-	UseIngress bool             `short:"i" help:"Create and use temporary ingress to access temporary service, e.g. from outside cluster"`
-	Address    string           `short:"a" help:"gRPC reflection server address, host:port"`
-	Plaintext  bool             `short:"p" help:"Use plain-text; no TLS"`
-	LogFormat  string           `help:"Log format ('json', 'std')" enum:"json,std" default:"std"`
-	Version    kong.VersionFlag `short:"v" help:"Print version information"`
+	UseIngress     bool             `short:"i" help:"Create and use temporary ingress to access temporary service, e.g. from outside cluster"`
+	Address        string           `short:"a" help:"gRPC reflection server address, host:port"`
+	Plaintext      bool             `short:"p" help:"Use plain-text; no TLS"`
+	LeaseNamespace string           `help:"Namespace in which leader election lease is created" default:"transflect" env:"LEASE_NAMESPACE"`
+	LogFormat      string           `help:"Log format ('json', 'std')" enum:"json,std" default:"std"`
+	Version        kong.VersionFlag `short:"v" help:"Print version information"`
 }
 
 func main() {
@@ -50,30 +51,32 @@ func run(cfg *config) error {
 	}
 
 	// start servers
-	g := &errgroup.Group{}
-	g.Go(probes.start)
-	g.Go(operator.start)
-	g.Go(handleSignals)
+	g, ctx := errgroup.WithContext(context.Background())
+	g.Go(func() error { return probes.start(ctx) })
+	g.Go(func() error { return operator.start(ctx) })
+	g.Go(func() error { return handleSignals(ctx) })
 
 	// shutdown
 	err = g.Wait()
 	if err != nil && !errors.Is(err, errSignal) {
 		log.Error().Err(err).Msg("Error causing shutdown")
 	}
-	probes.stop()
-	operator.stop()
 	log.Debug().Msg("Shutdown done")
 
 	return nil
 }
 
-func handleSignals() error {
+func handleSignals(ctx context.Context) error {
 	// handle graceful shutdown
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM) // Use SIGQUIT (ctrl+\) for instant shutdown
-	sig := <-c
-	log.Debug().Str("signal", sig.String()).Msg("Received signal, shutting down")
-	return errSignal
+	select {
+	case <-ctx.Done():
+		return nil
+	case sig := <-c:
+		log.Debug().Str("signal", sig.String()).Msg("Received signal, shutting down")
+		return errSignal
+	}
 }
 
 func setupLogging(cfg *config) {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cashapp/transflect/pkg/transflect"
+	"github.com/google/uuid"
 	"github.com/jpillora/backoff"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -24,6 +25,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/homedir"
 	"k8s.io/client-go/util/workqueue"
 )
@@ -35,6 +38,7 @@ type operator struct {
 	deployInformer informerv1.DeploymentInformer
 	queue          workqueue.RateLimitingInterface
 	stopper        chan struct{}
+	stopLock       sync.Mutex
 	wg             sync.WaitGroup
 	// activeState records the deployment revision and its grpc port
 	// for which an EnvoyFilter has been created. The port is required
@@ -47,10 +51,11 @@ type operator struct {
 	// so that no two updates for a single deployment can run concurrently.
 	deploymentLocker transflect.MutexMap
 
-	useIngress bool
-	plaintext  bool
-	address    string
-	version    string
+	useIngress     bool
+	plaintext      bool
+	address        string
+	version        string
+	leaseNamespace string
 }
 
 type activeEntry struct {
@@ -68,26 +73,57 @@ func newOperator(cfg *config) (*operator, error) {
 		k8s:   k8s,
 		istio: istio,
 
-		useIngress: cfg.UseIngress,
-		plaintext:  cfg.Plaintext,
-		address:    cfg.Address,
-		version:    "transflect-" + version,
+		useIngress:     cfg.UseIngress,
+		plaintext:      cfg.Plaintext,
+		address:        cfg.Address,
+		version:        "transflect-" + version,
+		leaseNamespace: cfg.LeaseNamespace,
 	}
 	return op, nil
 }
 
-func (o *operator) start() error {
+// start is concerned with setting up leader-election. If the current
+// process is chosen as leader, the main operator work is kicked off in
+// startLeading.
+func (o *operator) start(ctx context.Context) error {
+	// Run leader election
+	var err error
+	id := uuid.New().String()
+	ctx, cancel := context.WithCancel(ctx)
+	callbacks := leaderelection.LeaderCallbacks{
+		OnStartedLeading: func(ctx context.Context) {
+			log.Debug().Str("leaderID", id).Msg("Starting to lead")
+			if err = o.startLeading(); err != nil { // kick off operator
+				// stop the operator before we release the lease lock
+				// with `cancel()` so two operators are not running at
+				// the same time.
+				o.stop()
+				cancel()
+			}
+		},
+		OnStoppedLeading: func() {
+			log.Debug().Str("leaderID", id).Msg("Stop leading")
+			o.stop()
+		},
+		OnNewLeader: func(newID string) {
+			log.Debug().Str("leaderID", id).Str("newLeaderID", newID).Msg("New leader elected")
+		},
+	}
+	lock := o.newLock(id)
+	leaderelection.RunOrDie(ctx, newElection(lock, callbacks))
+	return err
+}
+
+func (o *operator) startLeading() error {
+	o.stopper = make(chan struct{})
+
 	// Initialise activeState for existing transflect EnvoyFilters
 	// to determine if EnvoyFilter upsert should be processed.
 	if err := o.syncActive(); err != nil {
 		return fmt.Errorf("cannot start operator: %w", err)
 	}
 
-	// Initialise work-queue and stopper channel
-	o.queue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
-	o.stopper = make(chan struct{})
-
-	// Initialise informers
+	// Initialise informers and queue
 	informerFactory := informers.NewSharedInformerFactory(o.k8s, time.Second*30)
 	o.rsInformer = informerFactory.Apps().V1().ReplicaSets()
 	if err := o.rsInformer.Informer().SetWatchErrorHandler(watchErrorHandler); err != nil {
@@ -104,6 +140,7 @@ func (o *operator) start() error {
 	o.deployInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		DeleteFunc: o.cleanupDeployment,
 	})
+	o.queue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 	log.Debug().Msg("Start leading: informer event handlers registered")
 
 	// Run workers and informers
@@ -160,6 +197,14 @@ func (o *operator) runWorker() {
 }
 
 func (o *operator) stop() {
+	o.stopLock.Lock()
+	defer o.stopLock.Unlock()
+	select {
+	case <-o.stopper:
+		return // stopper is already closed
+	default:
+	}
+
 	close(o.stopper)
 	o.wg.Wait()
 	log.Debug().Msg("All workers have finished")
@@ -344,6 +389,30 @@ func getConfig() (*rest.Config, error) {
 		return nil, errors.Wrap(err, "cannot find kube config")
 	}
 	return kubeCfg, nil
+}
+
+func (o *operator) newLock(id string) *resourcelock.LeaseLock {
+	return &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{
+			Name:      "transflect-leader",
+			Namespace: o.leaseNamespace,
+		},
+		Client: o.k8s.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: id,
+		},
+	}
+}
+
+func newElection(lock *resourcelock.LeaseLock, callbacks leaderelection.LeaderCallbacks) leaderelection.LeaderElectionConfig {
+	return leaderelection.LeaderElectionConfig{
+		Lock:            lock,
+		ReleaseOnCancel: true,
+		LeaseDuration:   20 * time.Second,
+		RenewDeadline:   15 * time.Second,
+		RetryPeriod:     5 * time.Second,
+		Callbacks:       callbacks,
+	}
 }
 
 func watchErrorHandler(_ *cache.Reflector, err error) {

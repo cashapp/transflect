@@ -28,14 +28,16 @@ func newProbesServer() *probesServer {
 	}
 }
 
-func (s *probesServer) start() error {
+func (s *probesServer) start(ctx context.Context) error {
+	go s.stopOnCancel(ctx)
 	if err := s.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return errors.Wrap(err, "cannot start probes server")
 	}
 	return nil
 }
 
-func (s *probesServer) stop() {
+func (s *probesServer) stopOnCancel(ctx context.Context) {
+	<-ctx.Done()
 	if err := s.Shutdown(context.Background()); err != nil {
 		log.Logger.Error().Err(err).Msg("cannot stop HTTP server")
 	}

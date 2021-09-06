@@ -125,6 +125,7 @@ your host machine (e.g. Mac laptop), outside the cluster
 
     make cluster-create                        # Create lightweight local cluster
     kubectl apply -f deployment/guppyecho.yaml # Add sample gRPC deployment
+    kubectl create namespace transflect        # namespace used for leader-election
     make run-local-operator                    # Start transflect on host machine
 
 Use <kbd>Ctrl</kbd> + <kbd>\\</kbd> to instantly shutdown the local operator
