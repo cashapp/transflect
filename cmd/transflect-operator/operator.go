@@ -108,8 +108,9 @@ func (o *operator) start() error {
 
 	// Run workers and informers
 	o.runWorkers(42)
-	o.rsInformer.Informer().Run(o.stopper)
-	o.deployInformer.Informer().Run(o.stopper)
+	go o.rsInformer.Informer().Run(o.stopper)
+	go o.deployInformer.Informer().Run(o.stopper)
+	<-o.stopper
 
 	// When run finishes e.g. because of signal calling o.stop():
 	log.Debug().Msg("Shutting down queue")
