@@ -93,7 +93,7 @@ func (o *operator) start(ctx context.Context) error {
 	callbacks := leaderelection.LeaderCallbacks{
 		OnStartedLeading: func(ctx context.Context) {
 			log.Debug().Str("leaderID", id).Msg("Starting to lead")
-			if err = o.startLeading(); err != nil { // kick off operator
+			if err = o.startLeading(ctx); err != nil { // kick off operator
 				// stop the operator before we release the lease lock
 				// with `cancel()` so two operators are not running at
 				// the same time.
@@ -114,12 +114,12 @@ func (o *operator) start(ctx context.Context) error {
 	return err
 }
 
-func (o *operator) startLeading() error {
+func (o *operator) startLeading(ctx context.Context) error {
 	o.stopper = make(chan struct{})
 
 	// Initialise activeState for existing transflect EnvoyFilters
 	// to determine if EnvoyFilter upsert should be processed.
-	if err := o.syncActive(); err != nil {
+	if err := o.syncActive(ctx); err != nil {
 		return fmt.Errorf("cannot start operator: %w", err)
 	}
 
@@ -144,7 +144,7 @@ func (o *operator) startLeading() error {
 	log.Debug().Msg("Start leading: informer event handlers registered")
 
 	// Run workers and informers
-	o.runWorkers(42)
+	o.runWorkers(ctx, 42)
 	go o.rsInformer.Informer().Run(o.stopper)
 	go o.deployInformer.Informer().Run(o.stopper)
 	<-o.stopper
@@ -183,15 +183,15 @@ func shouldEnqueue(rs *appsv1.ReplicaSet) bool {
 	return true
 }
 
-func (o *operator) runWorkers(cnt int) {
+func (o *operator) runWorkers(ctx context.Context, cnt int) {
 	for i := 0; i < cnt; i++ {
 		o.wg.Add(1)
-		go o.runWorker()
+		go o.runWorker(ctx)
 	}
 }
 
-func (o *operator) runWorker() {
-	for o.next() { // process next enqueued Replicaset
+func (o *operator) runWorker(ctx context.Context) {
+	for o.next(ctx) { // process next enqueued Replicaset
 	}
 	o.wg.Done()
 }
@@ -210,7 +210,7 @@ func (o *operator) stop() {
 	log.Debug().Msg("All workers have finished")
 }
 
-func (o *operator) next() bool {
+func (o *operator) next(ctx context.Context) bool {
 	key, shutdown := o.queue.Get()
 	if shutdown {
 		return false
@@ -232,7 +232,7 @@ func (o *operator) next() bool {
 	defer o.deploymentLocker.Unlock(deployKey)
 
 	if o.shouldProcessReplicaset(rs, deployKey) {
-		if err := o.processReplicaset(rs, deployKey); err != nil {
+		if err := o.processReplicaset(ctx, rs, deployKey); err != nil {
 			log.Error().Err(err).Str("replica", rs.Name).Msg("Cannot process EnvoyFilter for Replicaset")
 		}
 	}
@@ -271,10 +271,10 @@ func (o *operator) shouldProcessReplicaset(rs *appsv1.ReplicaSet, deployKey stri
 	return true
 }
 
-func (o *operator) processReplicaset(rs *appsv1.ReplicaSet, deployKey string) error {
+func (o *operator) processReplicaset(ctx context.Context, rs *appsv1.ReplicaSet, deployKey string) error {
 	port := grpcPort(rs)
 	if port == 0 {
-		if err := o.deleteFilter(context.Background(), rs); err != nil {
+		if err := o.deleteFilter(ctx, rs); err != nil {
 			if !k8errors.IsNotFound(err) {
 				return err
 			}
@@ -285,7 +285,7 @@ func (o *operator) processReplicaset(rs *appsv1.ReplicaSet, deployKey string) er
 		return nil
 	}
 
-	if err := o.upsertFilter(context.Background(), rs); err != nil {
+	if err := o.upsertFilter(ctx, rs); err != nil {
 		return err
 	}
 	revision := deployRevision(rs)
@@ -419,13 +419,12 @@ func watchErrorHandler(_ *cache.Reflector, err error) {
 	log.Debug().Err(err).Msg("ListAndWatch dropped the connection with an error, back-off and retry")
 }
 
-func (o *operator) syncActive() error {
+func (o *operator) syncActive(ctx context.Context) error {
 	opts := metav1.ListOptions{
 		LabelSelector: "app=transflect",
 		Limit:         42,
 	}
 	b := backoff.Backoff{Min: 2 * time.Second}
-	ctx := context.Background()
 	for {
 		list, err := o.istio.EnvoyFilters("").List(ctx, opts)
 		if err != nil {
