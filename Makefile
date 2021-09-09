@@ -61,7 +61,7 @@ GEN_ISTIO_CONFIG = $(O)/transflect \
                         --app echo \
                         --namespace echo \
                         localhost:9090 $(ISTIO_OUT)
-LOCAL_OPERATOR_CMD = $(O)/transflect-operator --plaintext --use-ingress --address localhost:80
+LOCAL_OPERATOR_CMD = $(O)/transflect-operator --plaintext --use-ingress --lease-namespace default --address localhost:80
 
 istio: istio-config istio-apply
 

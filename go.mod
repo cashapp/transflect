@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/alecthomas/kong v0.2.16
 	github.com/gogo/protobuf v1.3.2
+	github.com/google/uuid v1.1.2
 	github.com/jpillora/backoff v1.0.0
 	github.com/juliaogris/guppy v0.0.6
 	github.com/pkg/errors v0.9.1
