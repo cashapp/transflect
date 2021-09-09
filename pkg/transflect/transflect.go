@@ -35,7 +35,7 @@ func Base64Proto(m proto.Message) (string, error) {
 // transitive dependencies of all services running on address.
 // The gRPC Reflection API must be available on the given address.
 func GetFileDescriptorSet(ctx context.Context, addr string, opts ...grpc.DialOption) (*descriptorpb.FileDescriptorSet, []string, error) {
-	conn, err := grpc.Dial(addr, opts...)
+	conn, err := grpc.DialContext(ctx, addr, opts...)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "cannot grpc dial")
 	}
