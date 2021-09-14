@@ -5,9 +5,9 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strconv"
-	"strings"
 	"text/template"
 
 	"github.com/alecthomas/kong"
@@ -190,11 +190,11 @@ func printIstio(w io.Writer, descriptorSet proto.Message, services []string, cfg
 }
 
 func getPort(addr string) (int, error) {
-	p := strings.Split(addr, ":")
-	if len(p) != 2 {
-		return -1, fmt.Errorf("address not of format hostname:port")
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0, errors.Wrap(err, "cannot parse address")
 	}
-	i, err := strconv.Atoi(p[1])
+	i, err := strconv.Atoi(port)
 	if err != nil {
 		return 0, errors.Wrap(err, "cannot parse port")
 	}
