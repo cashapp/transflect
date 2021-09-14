@@ -210,7 +210,9 @@ func (o *operator) stop() {
 	default:
 	}
 
-	close(o.stopper)
+	if o.stopper != nil {
+		close(o.stopper)
+	}
 	o.wg.Wait()
 	log.Debug().Msg("All workers have finished")
 }
