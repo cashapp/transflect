@@ -56,6 +56,7 @@ type operator struct {
 	address        string
 	version        string
 	leaseNamespace string
+	leaseID        string
 }
 
 type activeEntry struct {
@@ -68,6 +69,10 @@ func newOperator(cfg *config) (*operator, error) {
 	if err != nil {
 		return nil, err
 	}
+	leaseID := cfg.LeaseID
+	if leaseID == "" {
+		leaseID = uuid.New().String()
+	}
 
 	op := &operator{
 		k8s:   k8s,
@@ -78,6 +83,7 @@ func newOperator(cfg *config) (*operator, error) {
 		address:        cfg.Address,
 		version:        "transflect-" + version,
 		leaseNamespace: cfg.LeaseNamespace,
+		leaseID:        leaseID,
 	}
 	return op, nil
 }
@@ -88,11 +94,10 @@ func newOperator(cfg *config) (*operator, error) {
 func (o *operator) start(ctx context.Context) error {
 	// Run leader election
 	var err error
-	id := uuid.New().String()
 	ctx, cancel := context.WithCancel(ctx)
 	callbacks := leaderelection.LeaderCallbacks{
 		OnStartedLeading: func(ctx context.Context) {
-			log.Debug().Str("leaderID", id).Msg("Starting to lead")
+			log.Debug().Str("leaderID", o.leaseID).Msg("Starting to lead")
 			if err = o.startLeading(ctx); err != nil { // kick off operator
 				// stop the operator before we release the lease lock
 				// with `cancel()` so two operators are not running at
@@ -102,14 +107,14 @@ func (o *operator) start(ctx context.Context) error {
 			}
 		},
 		OnStoppedLeading: func() {
-			log.Debug().Str("leaderID", id).Msg("Stop leading")
+			log.Debug().Str("leaderID", o.leaseID).Msg("Stop leading")
 			o.stop()
 		},
 		OnNewLeader: func(newID string) {
-			log.Debug().Str("leaderID", id).Str("newLeaderID", newID).Msg("New leader elected")
+			log.Debug().Str("leaderID", o.leaseID).Str("newLeaderID", newID).Msg("New leader elected")
 		},
 	}
-	lock := o.newLock(id)
+	lock := o.newLock(o.leaseID)
 	leaderelection.RunOrDie(ctx, newElection(lock, callbacks))
 	return err
 }

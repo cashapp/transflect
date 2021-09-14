@@ -40,6 +40,8 @@ spec:
           env:
           - name: LEASE_NAMESPACE
             valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+          - name: LEASE_ID
+            valueFrom: { fieldRef: { fieldPath: metadata.name } }
           livenessProbe:
             httpGet:
               path: /_liveness
