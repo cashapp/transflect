@@ -20,13 +20,13 @@
 
 set -euo pipefail
 
-main() {
-    rguide_v1_url=http://127.0.0.1/api/rguide.RouteGuide/GetFeature
-    rguide_v2_url=http://127.0.0.1/api/rguide.RouteGuide/GetDefaultFeature
-    rguide_v2=v0.0.4
-    echo_url=http://127.0.0.1/api/echo/hello
-    attempts=25
+rguide_v1_url=http://127.0.0.1/api/rguide.RouteGuide/GetFeature
+rguide_v2_url=http://127.0.0.1/api/rguide.RouteGuide/GetDefaultFeature
+rguide_v2=v0.0.4
+echo_url=http://127.0.0.1/api/echo/hello
+attempts=25
 
+main() {
     # Set up initial deployments and transflect
     kubectl apply -f deployment/transflect.yaml
     kubectl apply -f deployment/routeguide.yaml
@@ -49,12 +49,36 @@ main() {
     echo 'Expecting: "routeguide-transflect" not found'
     ./out/retry-until-fail 5 5s kubectl get envoyfilter guppyecho-transflect -n guppyecho
 
+    check_metrics
+
     # Ensure EnvoyFilter gets deleted when transflect/port annotation is invalidated while transflect is offline
     kubectl delete -f deployment/transflect.yaml
     kubectl get envoyfilter routeguide-transflect -n routeguide
     kubectl annotate deployment routeguide transflect.cash.squareup.com/port=-1 --overwrite -n routeguide
     kubectl apply -f deployment/transflect.yaml
+    echo 'expect "Error from server (NotFound)"'
     ./out/retry-until-fail 5 5s kubectl get envoyfilter routeguide-transflect -n routeguide
+    echo "Integration tests finished successfully."
+}
+
+check_metrics() {
+    pod=$(kubectl get lease -n transflect transflect-leader -o jsonpath='{.spec.holderIdentity}')
+    kubectl port-forward "pod/${pod}" 9090 -n transflect &
+    #shellcheck disable=SC2064
+    trap "kill $!" EXIT
+    sleep 1
+    metrics_got=$(curl -s localhost:9090/metrics | grep "^transflect_" | grep --invert-match "^transflect_ignored_total" | sort)
+
+    metrics_want='transflect_envoyfilters 2
+transflect_operations_total{status="success",type="delete"} 1
+transflect_operations_total{status="success",type="upsert"} 3
+transflect_preprocess_error_total 0'
+
+    if [ "${metrics_want}" != "${metrics_got}" ]; then
+        printf "unexpected metrics value\n want:\n%s\n\n got:\n%s\n" "${metrics_want}" "${metrics_got}"
+        exit 1
+    fi
+    echo "metrics test SUCCESS"
 }
 
 # Only run main if executed as a script and not "sourced".
