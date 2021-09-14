@@ -56,6 +56,7 @@ type operator struct {
 	address        string
 	version        string
 	leaseNamespace string
+	leaseID        string
 }
 
 type activeEntry struct {
@@ -68,6 +69,10 @@ func newOperator(cfg *config) (*operator, error) {
 	if err != nil {
 		return nil, err
 	}
+	leaseID := cfg.LeaseID
+	if leaseID == "" {
+		leaseID = uuid.New().String()
+	}
 
 	op := &operator{
 		k8s:   k8s,
@@ -78,6 +83,7 @@ func newOperator(cfg *config) (*operator, error) {
 		address:        cfg.Address,
 		version:        "transflect-" + version,
 		leaseNamespace: cfg.LeaseNamespace,
+		leaseID:        leaseID,
 	}
 	return op, nil
 }
@@ -88,11 +94,10 @@ func newOperator(cfg *config) (*operator, error) {
 func (o *operator) start(ctx context.Context) error {
 	// Run leader election
 	var err error
-	id := uuid.New().String()
 	ctx, cancel := context.WithCancel(ctx)
 	callbacks := leaderelection.LeaderCallbacks{
 		OnStartedLeading: func(ctx context.Context) {
-			log.Debug().Str("leaderID", id).Msg("Starting to lead")
+			log.Debug().Str("leaderID", o.leaseID).Msg("Starting to lead")
 			if err = o.startLeading(ctx); err != nil { // kick off operator
 				// stop the operator before we release the lease lock
 				// with `cancel()` so two operators are not running at
@@ -102,14 +107,14 @@ func (o *operator) start(ctx context.Context) error {
 			}
 		},
 		OnStoppedLeading: func() {
-			log.Debug().Str("leaderID", id).Msg("Stop leading")
+			log.Debug().Str("leaderID", o.leaseID).Msg("Stop leading")
 			o.stop()
 		},
 		OnNewLeader: func(newID string) {
-			log.Debug().Str("leaderID", id).Str("newLeaderID", newID).Msg("New leader elected")
+			log.Debug().Str("leaderID", o.leaseID).Str("newLeaderID", newID).Msg("New leader elected")
 		},
 	}
-	lock := o.newLock(id)
+	lock := o.newLock(o.leaseID)
 	leaderelection.RunOrDie(ctx, newElection(lock, callbacks))
 	return err
 }
@@ -205,7 +210,9 @@ func (o *operator) stop() {
 	default:
 	}
 
-	close(o.stopper)
+	if o.stopper != nil {
+		close(o.stopper)
+	}
 	o.wg.Wait()
 	log.Debug().Msg("All workers have finished")
 }
@@ -219,11 +226,13 @@ func (o *operator) next(ctx context.Context) bool {
 	rsName, ok := key.(string)
 	if !ok {
 		log.Error().Interface("key", key).Msg("Invalid key type, expected string")
+		preprocessErrCounter.Inc()
 		return true
 	}
 	rs, err := o.getReplicaset(rsName)
 	if err != nil {
 		log.Error().Err(err).Msg("Cannot get next queued Replicaset")
+		preprocessErrCounter.Inc()
 		return true
 	}
 
@@ -231,10 +240,13 @@ func (o *operator) next(ctx context.Context) bool {
 	o.deploymentLocker.Lock(deployKey)
 	defer o.deploymentLocker.Unlock(deployKey)
 
-	if o.shouldProcessReplicaset(rs, deployKey) {
-		if err := o.processReplicaset(ctx, rs, deployKey); err != nil {
-			log.Error().Err(err).Str("replica", rs.Name).Msg("Cannot process EnvoyFilter for Replicaset")
-		}
+	if !o.shouldProcessReplicaset(rs, deployKey) {
+		ignoredCounter.Inc()
+		return true
+	}
+
+	if err := o.processReplicaset(ctx, rs, deployKey); err != nil {
+		log.Error().Err(err).Str("replica", rs.Name).Msg("Cannot process EnvoyFilter for Replicaset")
 	}
 	return true
 }
@@ -276,21 +288,27 @@ func (o *operator) processReplicaset(ctx context.Context, rs *appsv1.ReplicaSet,
 	if port == 0 {
 		if err := o.deleteFilter(ctx, rs); err != nil {
 			if !k8errors.IsNotFound(err) {
+				processedCounter.WithLabelValues("error", "delete").Inc()
 				return err
 			}
 			log.Warn().Err(err).Str("replica", rs.Name).Msg("Cannot delete EnvoyFilter because it cannot be found")
 		}
 		o.activeState.Delete(deployKey)
 		o.deploymentLocker.Remove(deployKey)
+		filtersGauge.Dec()
+		processedCounter.WithLabelValues("success", "delete").Inc()
 		return nil
 	}
 
 	if err := o.upsertFilter(ctx, rs); err != nil {
+		processedCounter.WithLabelValues("error", "upsert").Inc()
 		return err
 	}
 	revision := deployRevision(rs)
 	active := activeEntry{grpcPort: port, revision: revision}
 	o.activeState.Store(deployKey, active)
+	filtersGauge.Inc()
+	processedCounter.WithLabelValues("success", "upsert").Inc()
 	return nil
 }
 
@@ -424,6 +442,7 @@ func (o *operator) syncActive(ctx context.Context) error {
 		LabelSelector: "app=transflect",
 		Limit:         42,
 	}
+	activeCnt := 0
 	b := backoff.Backoff{Min: 2 * time.Second}
 	for {
 		list, err := o.istio.EnvoyFilters("").List(ctx, opts)
@@ -442,9 +461,11 @@ func (o *operator) syncActive(ctx context.Context) error {
 				continue
 			}
 			o.activeState.Store(key, entry)
+			activeCnt++
 			log.Debug().Str("deploymentKey", key).Int("revision", entry.revision).Uint32("port", entry.grpcPort).Msg("synced active state")
 		}
 		if opts.Continue == "" {
+			filtersGauge.Set(float64(activeCnt))
 			return nil
 		}
 	}

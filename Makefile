@@ -103,11 +103,10 @@ FAIL_COVERAGE = { echo '$(COLOUR_RED)FAIL - Coverage below $(COVERAGE)%$(COLOUR_
 CLUSTER ?= transflect
 REGISTRY_NAME = registry.$(CLUSTER).local
 REGISTRY = k3d-$(REGISTRY_NAME):420
-DELETE_CLUSTER_CMD = k3d cluster delete $(CLUSTER); k3d registry delete $(REGISTRY_NAME) || true
+DELETE_CLUSTER_CMD = k3d cluster delete $(CLUSTER); k3d registry delete $(REGISTRY_NAME)
 
 cluster-test: build cluster-create  ## Test integration on local cluster, slower
 	./cluster-test.sh
-	$(DELETE_CLUSTER_CMD)
 
 cluster-clean:  ## Cleanup all deployments and resources in local k3d cluster, but keep cluster
 	-kubectl delete -f deployment/transflect.yaml
@@ -143,6 +142,11 @@ cluster-delete:  ## Delete the entire local k3d cluster
 docker-purge: # WARNING: will delete dangling images and stopped containers!
 	docker system prune --all
 	docker network prune
+
+clean::
+	-$(DELETE_CLUSTER_CMD) 2> /dev/null
+
+.PHONY: add-registry-host ci-add-registry-host cluster-clean cluster-create cluster-delete cluster-test docker-purge
 
 # --- Lint ---------------------------------------------------------------------
 
