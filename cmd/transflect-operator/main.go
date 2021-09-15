@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
 	"golang.org/x/sync/errgroup"
+	"k8s.io/client-go/util/workqueue"
 )
 
 var (
@@ -46,6 +47,7 @@ func main() {
 
 func run(cfg *config) error {
 	setupLogging(cfg)
+	workqueue.SetProvider(&metricsProvider{})
 
 	// create servers
 	probes := newProbesServer(cfg.ProbesPort)

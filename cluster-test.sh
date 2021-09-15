@@ -73,6 +73,23 @@ check_metrics() {
 transflect_operations_total{status="success",type="delete"} 1
 transflect_operations_total{status="success",type="upsert"} 3
 transflect_preprocess_error_total 0'
+    if [ "${metrics_want}" != "${metrics_got}" ]; then
+        printf "unexpected metrics value\n want:\n%s\n\n got:\n%s\n" "${metrics_want}" "${metrics_got}"
+        exit 1
+    fi
+
+    metrics_got=$(curl -s localhost:9090/metrics | awk -F'{' '/^workqueue_/ {print $1}' | sort -u)
+    metrics_want='workqueue_adds_total
+workqueue_depth
+workqueue_latency_seconds_bucket
+workqueue_latency_seconds_count
+workqueue_latency_seconds_sum
+workqueue_longest_running_processor_seconds
+workqueue_retries_total
+workqueue_unfinished_work_seconds
+workqueue_work_duration_seconds_bucket
+workqueue_work_duration_seconds_count
+workqueue_work_duration_seconds_sum'
 
     if [ "${metrics_want}" != "${metrics_got}" ]; then
         printf "unexpected metrics value\n want:\n%s\n\n got:\n%s\n" "${metrics_want}" "${metrics_got}"
