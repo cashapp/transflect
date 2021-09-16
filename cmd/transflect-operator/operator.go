@@ -145,7 +145,7 @@ func (o *operator) startLeading(ctx context.Context) error {
 	o.deployInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		DeleteFunc: o.cleanupDeployment,
 	})
-	o.queue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
+	o.queue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "replicasets")
 	log.Debug().Msg("Start leading: informer event handlers registered")
 
 	// Run workers and informers

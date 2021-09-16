@@ -10,41 +10,16 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/cashapp/transflect/pkg/transflect"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
 	"golang.org/x/sync/errgroup"
+	"k8s.io/client-go/util/workqueue"
 )
 
 var (
 	version   = "v0.0.0"
 	errSignal = fmt.Errorf("received shutdown signal")
-
-	// metrics
-	// filtersGauge includes filters that already exist at startup.
-	filtersGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "transflect_envoyfilters",
-		Help: "Current number of EnvoyFilters managed by transflect",
-	})
-	processedCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "transflect_operations_total",
-		Help: "The total number of transflect operations processed",
-	},
-		[]string{
-			"status", // success, error
-			"type",   // upsert, delete
-		},
-	)
-	preprocessErrCounter = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "transflect_preprocess_error_total",
-		Help: "The total number of replicaset ids popped off the queue that errored before being processed",
-	})
-	ignoredCounter = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "transflect_ignored_total",
-		Help: "The total number of replicaset ids popped off the queue that were ignored and didn't need processing",
-	})
 )
 
 type config struct {
@@ -72,6 +47,7 @@ func main() {
 
 func run(cfg *config) error {
 	setupLogging(cfg)
+	workqueue.SetProvider(&metricsProvider{})
 
 	// create servers
 	probes := newProbesServer(cfg.ProbesPort)
