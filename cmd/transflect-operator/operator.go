@@ -98,6 +98,7 @@ func (o *operator) start(ctx context.Context) error {
 	callbacks := leaderelection.LeaderCallbacks{
 		OnStartedLeading: func(ctx context.Context) {
 			log.Debug().Str("leaderID", o.leaseID).Msg("Starting to lead")
+			leaderGauge.Set(1)
 			if err = o.startLeading(ctx); err != nil { // kick off operator
 				// stop the operator before we release the lease lock
 				// with `cancel()` so two operators are not running at
@@ -108,6 +109,7 @@ func (o *operator) start(ctx context.Context) error {
 		},
 		OnStoppedLeading: func() {
 			log.Debug().Str("leaderID", o.leaseID).Msg("Stop leading")
+			leaderGauge.Set(0)
 			o.stop()
 		},
 		OnNewLeader: func(newID string) {
