@@ -12,6 +12,10 @@ var (
 		Name: "transflect_envoyfilters",
 		Help: "Current number of EnvoyFilters managed by transflect.",
 	})
+	leaderGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "transflect_leader",
+		Help: "Currently holding leadership.",
+	})
 	processedCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "transflect_operations_total",
 		Help: "The total number of transflect operations processed.",
