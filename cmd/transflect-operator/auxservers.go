@@ -15,7 +15,7 @@ type httpServer struct {
 	name string
 }
 
-func newProbesServer(addr string) *httpServer {
+func newProbesServer(port uint) *httpServer {
 	ok := func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "OK")
 	}
@@ -24,19 +24,19 @@ func newProbesServer(addr string) *httpServer {
 	mux.HandleFunc("/_readiness", ok)
 	return &httpServer{
 		Server: http.Server{
-			Addr:    addr,
+			Addr:    fmt.Sprintf(":%d", port),
 			Handler: mux,
 		},
 		name: "probes",
 	}
 }
 
-func newMetricsServer(addr string) *httpServer {
+func newMetricsServer(port uint) *httpServer {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	return &httpServer{
 		Server: http.Server{
-			Addr:    addr,
+			Addr:    fmt.Sprintf(":%d", port),
 			Handler: mux,
 		},
 		name: "metrics",
