@@ -31,8 +31,8 @@ type config struct {
 	LogFormat      string           `help:"Log format ('json', 'std')" enum:"json,std" default:"std"`
 	Version        kong.VersionFlag `short:"v" help:"Print version information"`
 
-	ProbesPort  string `help:"Probes server port" env:"PROBES_PORT" default:":8080"`
-	MetricsPort string `help:"Metrics server port" env:"METRICS_PORT" default:":9090"`
+	ProbesPort  uint `help:"Probes server port" env:"PROBES_PORT" default:"8080"`
+	MetricsPort uint `help:"Metrics server port" env:"METRICS_PORT" default:"9090"`
 }
 
 func main() {
