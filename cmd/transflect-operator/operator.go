@@ -17,7 +17,6 @@ import (
 	istionet "istio.io/client-go/pkg/apis/networking/v1alpha3"
 	istio "istio.io/client-go/pkg/clientset/versioned/typed/networking/v1alpha3"
 	appsv1 "k8s.io/api/apps/v1"
-	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	informerv1 "k8s.io/client-go/informers/apps/v1"
@@ -289,15 +288,10 @@ func (o *operator) processReplicaset(ctx context.Context, rs *appsv1.ReplicaSet,
 	port := grpcPort(rs)
 	if port == 0 {
 		if err := o.deleteFilter(ctx, rs); err != nil {
-			if !k8errors.IsNotFound(err) {
-				processedCounter.WithLabelValues("error", "delete").Inc()
-				return err
-			}
-			log.Warn().Err(err).Str("replica", rs.Name).Msg("Cannot delete EnvoyFilter because it cannot be found")
+			processedCounter.WithLabelValues("error", "delete").Inc()
 		}
 		o.activeState.Delete(deployKey)
 		o.deploymentLocker.Remove(deployKey)
-		filtersGauge.Dec()
 		processedCounter.WithLabelValues("success", "delete").Inc()
 		return nil
 	}
@@ -309,7 +303,6 @@ func (o *operator) processReplicaset(ctx context.Context, rs *appsv1.ReplicaSet,
 	revision := deployRevision(rs)
 	active := activeEntry{grpcPort: port, revision: revision}
 	o.activeState.Store(deployKey, active)
-	filtersGauge.Inc()
 	processedCounter.WithLabelValues("success", "upsert").Inc()
 	return nil
 }

@@ -23,9 +23,14 @@ func (o *operator) deleteFilter(ctx context.Context, rs *appsv1.ReplicaSet) erro
 	name := envoyFilterName(rs)
 	opts := metav1.DeleteOptions{}
 	if err := o.istio.EnvoyFilters(rs.Namespace).Delete(ctx, name, opts); err != nil {
-		return errors.Wrapf(err, "cannot delete EnvoyFilter %s", name)
+		if !k8errors.IsNotFound(err) {
+			return errors.Wrapf(err, "cannot delete EnvoyFilter %s", name)
+		}
+		log.Warn().Err(err).Str("replica", rs.Name).Msg("Cannot delete EnvoyFilter because it cannot be found")
+	} else {
+		log.Debug().Str("replica", rs.Name).Msg("EnvoyFilter deleted")
 	}
-	log.Debug().Str("replica", rs.Name).Msg("EnvoyFilter deleted")
+	filtersGauge.Dec()
 	return nil
 }
 
@@ -196,6 +201,7 @@ func (o *operator) upsertEnvoyFilter(ctx context.Context, rs *appsv1.ReplicaSet,
 	opts := metav1.CreateOptions{}
 	_, err = o.istio.EnvoyFilters(rs.Namespace).Create(ctx, envoyFilter, opts)
 	if err == nil {
+		filtersGauge.Inc()
 		return nil
 	} else if !k8errors.IsAlreadyExists(err) {
 		return errors.Wrap(err, "cannot upsert EnvoyFilter")

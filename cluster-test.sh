@@ -69,7 +69,7 @@ check_metrics() {
     sleep 1
     metrics_got=$(curl -s localhost:9090/metrics | grep "^transflect_" | grep --invert-match "^transflect_ignored_total" | sort)
 
-    metrics_want='transflect_envoyfilters 2
+    metrics_want='transflect_envoyfilters 1
 transflect_leader 1
 transflect_operations_total{status="success",type="delete"} 1
 transflect_operations_total{status="success",type="upsert"} 3
