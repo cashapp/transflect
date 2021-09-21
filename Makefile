@@ -139,6 +139,12 @@ cluster-create: registry-create
 cluster-delete:  ## Delete the entire local k3d cluster
 	$(DELETE_CLUSTER_CMD)
 
+metrics-portforward:  ## Setup k8s port forwarding to transflect metrics in cluster
+	kubectl port-forward "pod/$$(kubectl get lease -n transflect transflect-leader -o jsonpath='{.spec.holderIdentity}')" 9090 -n transflect
+
+metrics-server:  ## Start prometheus server scraping transflect metrics
+	prometheus --config.file=bin/prom.yaml --web.listen-address=:9999 --storage.tsdb.path="out/data/"
+
 docker-purge: # WARNING: will delete dangling images and stopped containers!
 	docker system prune --all
 	docker network prune
