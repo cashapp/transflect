@@ -13,4 +13,9 @@ FROM alpine:3.13
 RUN apk --no-cache add curl
 COPY --from=builder /src/transflect-operator /app/
 COPY --from=builder /src/transflect /app/
+
+# Set to a non-root user, outside the standard range of commonly set user ids
+RUN addgroup -S -g 2000 appuser && adduser -S -u 2000 -g appuser appuser
+USER appuser
+
 ENTRYPOINT /app/transflect-operator --plaintext --log-format json
