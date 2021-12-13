@@ -30,6 +30,15 @@ import (
 	"k8s.io/client-go/util/workqueue"
 )
 
+const (
+	deployementAnnotation = "transflect.cash.squareup.com/deployment"
+	excludeAnnotation     = "transflect.cash.squareup.com/exclude-grpc-services"
+	includeAnnotation     = "transflect.cash.squareup.com/include-grpc-services"
+	portAnnotation        = "transflect.cash.squareup.com/port"
+	replicasetAnnotation  = "transflect.cash.squareup.com/replicaset"
+	versionAnnotation     = "transflect.cash.squareup.com/version"
+)
+
 type operator struct {
 	k8s            *kubernetes.Clientset
 	istio          *istio.NetworkingV1alpha3Client
@@ -43,7 +52,7 @@ type operator struct {
 	// for which an EnvoyFilter has been created. The port is required
 	// to update the EnvoyFilter on port annotation change.
 	//
-	// 	    activeState[deploymentKey] = { revision, grpcPort }
+	// 	    activeState[deploymentKey] = { revision, grpcPort, /* other annotations */ }
 	activeState sync.Map
 
 	// deploymentLocker synchronises operations on a deployment
@@ -60,7 +69,10 @@ type operator struct {
 
 type activeEntry struct {
 	revision int
-	grpcPort uint32
+	// Annotations
+	grpcPort        uint32
+	excludeServices string
+	includeServices string
 }
 
 func newOperator(cfg *config) (*operator, error) {
@@ -272,7 +284,7 @@ func (o *operator) shouldProcessReplicaset(rs *appsv1.ReplicaSet, deployKey stri
 		}
 		// Potential race condition if not performed under deployment
 		// lock and port is changed several times in a short period of time.
-		if revision == active.revision && port == active.grpcPort {
+		if active == newActiveEntry(rs) {
 			return false
 		}
 	}
@@ -285,8 +297,7 @@ func (o *operator) shouldProcessReplicaset(rs *appsv1.ReplicaSet, deployKey stri
 }
 
 func (o *operator) processReplicaset(ctx context.Context, rs *appsv1.ReplicaSet, deployKey string) error {
-	port := grpcPort(rs)
-	if port == 0 {
+	if grpcPort(rs) == 0 {
 		if err := o.deleteFilter(ctx, rs); err != nil {
 			processedCounter.WithLabelValues("error", "delete").Inc()
 		}
@@ -300,15 +311,14 @@ func (o *operator) processReplicaset(ctx context.Context, rs *appsv1.ReplicaSet,
 		processedCounter.WithLabelValues("error", "upsert").Inc()
 		return err
 	}
-	revision := deployRevision(rs)
-	active := activeEntry{grpcPort: port, revision: revision}
+	active := newActiveEntry(rs)
 	o.activeState.Store(deployKey, active)
 	processedCounter.WithLabelValues("success", "upsert").Inc()
 	return nil
 }
 
 func grpcPort(rs *appsv1.ReplicaSet) uint32 {
-	return grpcPortStr(rs.Annotations["transflect.cash.squareup.com/port"])
+	return grpcPortStr(rs.Annotations[portAnnotation])
 }
 
 func grpcPortStr(s string) uint32 {
@@ -468,11 +478,11 @@ func (o *operator) syncActive(ctx context.Context) error {
 
 func getActiveEntry(filter istionet.EnvoyFilter) (string, activeEntry, error) {
 	a := filter.Annotations
-	key := a["transflect.cash.squareup.com/deployment"]
+	key := a[deployementAnnotation]
 	if key == "" {
 		return "", activeEntry{}, fmt.Errorf("cannot retrieve deployment key from existing EnvoyFilter")
 	}
-	port := grpcPortStr(filter.Annotations["transflect.cash.squareup.com/port"])
+	port := grpcPortStr(filter.Annotations[portAnnotation])
 	if port == 0 {
 		return "", activeEntry{}, fmt.Errorf("cannot retrieve grpc port from existing EnvoyFilter")
 	}
@@ -497,4 +507,13 @@ func (o *operator) cleanupDeployment(v interface{}) {
 	}
 	o.activeState.Delete(key)
 	o.deploymentLocker.Remove(key)
+}
+
+func newActiveEntry(rs *appsv1.ReplicaSet) activeEntry {
+	return activeEntry{
+		grpcPort:        grpcPort(rs),
+		revision:        deployRevision(rs),
+		excludeServices: rs.Annotations[excludeAnnotation],
+		includeServices: rs.Annotations[includeAnnotation],
+	}
 }
