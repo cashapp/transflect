@@ -19,9 +19,6 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
-// HTTPAnnotationPrefix url path prefix to use for missing HTTPRule.
-var HTTPAnnotationPrefix = "/api"
-
 // Base64Proto marshals and base64 encodes Proto message.
 func Base64Proto(m proto.Message) (string, error) {
 	b, err := proto.Marshal(m)
@@ -34,27 +31,27 @@ func Base64Proto(m proto.Message) (string, error) {
 // GetFileDescriptorSet returns the combined FileDescriptorProtos and
 // transitive dependencies of all services running on address.
 // The gRPC Reflection API must be available on the given address.
-func GetFileDescriptorSet(ctx context.Context, addr string, opts ...grpc.DialOption) (*descriptorpb.FileDescriptorSet, []string, error) {
+func GetFileDescriptorSet(ctx context.Context, addr string, httpPathPrefix string, opts ...grpc.DialOption) (*descriptorpb.FileDescriptorSet, []string, error) {
 	conn, err := grpc.DialContext(ctx, addr, opts...)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "cannot grpc dial")
 	}
 	defer conn.Close()
 	client := rpb.NewServerReflectionClient(conn)
-	return getFileDescriptorSetWithRetry(ctx, client, addr)
+	return getFileDescriptorSetWithRetry(ctx, client, addr, httpPathPrefix)
 }
 
 // LogAttempt is a hook for custom, possibly structured logging.
 // It defaults to a no-op.
 var LogAttempt = func(ctx context.Context, attempt int, err error) {}
 
-func getFileDescriptorSetWithRetry(ctx context.Context, client rpb.ServerReflectionClient, addr string) (*descriptorpb.FileDescriptorSet, []string, error) {
+func getFileDescriptorSetWithRetry(ctx context.Context, client rpb.ServerReflectionClient, addr string, httpPathPrefix string) (*descriptorpb.FileDescriptorSet, []string, error) {
 	b := &backoff.Backoff{
 		Min: 2 * time.Second,
 		Max: 30 * time.Second,
 	}
 	for {
-		fds, services, err := getFileDescriptorSet(ctx, client, addr)
+		fds, services, err := getFileDescriptorSet(ctx, client, addr, httpPathPrefix)
 		if err == nil {
 			return fds, services, nil
 		}
@@ -78,7 +75,7 @@ func getGRPCStatus(err error) (codes.Code, bool) {
 	return 0, false
 }
 
-func getFileDescriptorSet(ctx context.Context, client rpb.ServerReflectionClient, addr string) (*descriptorpb.FileDescriptorSet, []string, error) {
+func getFileDescriptorSet(ctx context.Context, client rpb.ServerReflectionClient, addr string, httpPathPrefix string) (*descriptorpb.FileDescriptorSet, []string, error) {
 	services, err := getServices(ctx, client, addr)
 	if err != nil {
 		return nil, nil, err
@@ -94,7 +91,7 @@ func getFileDescriptorSet(ctx context.Context, client rpb.ServerReflectionClient
 		for _, file := range filesSlice {
 			name := file.GetName()
 			if files[name] == nil {
-				AnnotateHTTPRule(file)
+				AnnotateHTTPRule(file, httpPathPrefix)
 				files[name] = file
 				names = append(names, name)
 			}
@@ -151,7 +148,7 @@ func topoSort(names []string, files map[string]*descriptorpb.FileDescriptorProto
 
 // AnnotateHTTPRule adds /api/<pkg>.<service>/<method> as HTTP URL path
 // to  methods without http option provided in proto definition.
-func AnnotateHTTPRule(fd *descriptorpb.FileDescriptorProto) {
+func AnnotateHTTPRule(fd *descriptorpb.FileDescriptorProto, httpPathPrefix string) {
 	for _, service := range fd.GetService() {
 		for _, method := range service.GetMethod() {
 			opts := method.GetOptions()
@@ -162,7 +159,7 @@ func AnnotateHTTPRule(fd *descriptorpb.FileDescriptorProto) {
 				method.Options = &descriptorpb.MethodOptions{}
 			}
 
-			path := fmt.Sprintf("%s/%s.%s/%s", HTTPAnnotationPrefix, fd.GetPackage(), service.GetName(), method.GetName())
+			path := fmt.Sprintf("%s/%s.%s/%s", httpPathPrefix, fd.GetPackage(), service.GetName(), method.GetName())
 			httpAnnotation := &annotations.HttpRule{
 				Body: "*",
 				Pattern: &annotations.HttpRule_Post{

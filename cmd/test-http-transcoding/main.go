@@ -19,6 +19,7 @@ type config struct {
 	Host              string        `short:"H" help:"Host field to set in header" default:"routeguide.local"`
 	Dur               time.Duration `short:"d" help:"Duration to wait between attempts" default:"5s"`
 	ContinueOnSuccess bool          `short:"c" help:"Continue on success until timeout"`
+	Body              string        `short:"B" help:"Request Body" default:"{}"`
 
 	PollUntilError bool `short:"v" help:"Keep polling until error or timeout, otherwise keep polling until success or timeout."`
 	ErrorThreshold uint `short:"e" help:"Allow for X errors during polling"`
@@ -46,7 +47,7 @@ func main() {
 	cfg.req = &http.Request{
 		Method: http.MethodPost,
 		URL:    cfg.url,
-		Body:   io.NopCloser(strings.NewReader(`{"lat": 0, "long": 0}`)),
+		Body:   io.NopCloser(strings.NewReader(cfg.Body)),
 		Host:   cfg.Host,
 	}
 

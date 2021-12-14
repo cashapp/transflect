@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cashapp/transflect/pkg/transflect"
 	"github.com/gogo/protobuf/types"
@@ -51,16 +52,56 @@ func (o *operator) upsertFilter(ctx context.Context, rs *appsv1.ReplicaSet) erro
 	}
 	addr, opts := o.getAddrOpts(rs)
 	ctx = context.WithValue(ctx, ctxReplicaKey, rs.Name)
-	fds, services, err := transflect.GetFileDescriptorSet(ctx, addr, opts...)
+	httpPathPrefix := rs.Annotations["transflect.cash.squareup.com/http-path-prefix"]
+	if httpPathPrefix == "" {
+		httpPathPrefix = o.httpPathPrefix
+	}
+	fds, services, err := transflect.GetFileDescriptorSet(ctx, addr, httpPathPrefix, opts...)
 	if err != nil {
 		return errors.Wrapf(err, "cannot query Reflection API or create FileDescriptor for address %s", o.address)
 	}
+	services = filterGRPCServices(services, rs)
 	log.Debug().Str("replica", rs.Name).Strs("grpcServices", services).Msg("Reflection API queried")
 	if err := o.upsertEnvoyFilter(ctx, rs, fds, services); err != nil {
 		return errors.Wrap(err, "cannot upsert EnvoyFilter resource")
 	}
 	log.Debug().Str("replica", rs.Name).Msg("EnvoyFilter upserted")
 	return nil
+}
+
+func filterGRPCServices(services []string, rs *appsv1.ReplicaSet) []string {
+	exclude := mapFromString(rs.Annotations[excludeAnnotation])
+	if len(exclude) > 0 {
+		result := make([]string, 0, len(services)-len(exclude))
+		for _, s := range services {
+			if !exclude[s] {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	include := mapFromString(rs.Annotations[includeAnnotation])
+	if len(include) > 0 {
+		result := make([]string, 0, len(include))
+		for _, s := range services {
+			if include[s] {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	return services
+}
+
+func mapFromString(s string) map[string]bool {
+	if s == "" {
+		return nil
+	}
+	m := map[string]bool{}
+	for _, e := range strings.Split(s, ",") {
+		m[strings.TrimSpace(e)] = true
+	}
+	return m
 }
 
 func (o *operator) createService(ctx context.Context, rs *appsv1.ReplicaSet) (*corev1.Service, error) {
@@ -265,11 +306,11 @@ func newEnvoyFilter(rs *appsv1.ReplicaSet, protosetBase64 string, services []str
 			Name:      envoyFilterName(rs),
 			Labels:    map[string]string{"app": "transflect"},
 			Annotations: map[string]string{
-				"transflect.cash.squareup.com/version":    version,
-				"transflect.cash.squareup.com/replicaset": rs.Name,
-				"transflect.cash.squareup.com/deployment": deployKey,
-				"transflect.cash.squareup.com/port":       rs.Annotations["transflect.cash.squareup.com/port"],
-				"deployment.kubernetes.io/revision":       rs.Annotations["deployment.kubernetes.io/revision"],
+				versionAnnotation:                   version,
+				replicasetAnnotation:                rs.Name,
+				deploymentAnnotation:                deployKey,
+				portAnnotation:                      rs.Annotations[portAnnotation],
+				"deployment.kubernetes.io/revision": rs.Annotations["deployment.kubernetes.io/revision"],
 			},
 			OwnerReferences: envoyFilterOwner(rs), // default: Deployment. On Deployment deletion EnvoyFilter gets deleted automatically.
 		},

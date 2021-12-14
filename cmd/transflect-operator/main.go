@@ -31,8 +31,9 @@ type config struct {
 	LogFormat      string           `help:"Log format ('json', 'std')" enum:"json,std" default:"std"`
 	Version        kong.VersionFlag `short:"v" help:"Print version information"`
 
-	ProbesPort  uint `help:"Probes server port" env:"PROBES_PORT" default:"8080"`
-	MetricsPort uint `help:"Metrics server port" env:"METRICS_PORT" default:"9090"`
+	ProbesPort     uint   `help:"Probes server port" env:"PROBES_PORT" default:"8080"`
+	MetricsPort    uint   `help:"Metrics server port" env:"METRICS_PORT" default:"9090"`
+	HTTPPathPrefix string `help:"Default path prefix for gRPC methods that are not annotated; e.g. /api" env:"HTTP_PATH_PREFIX"`
 }
 
 func main() {

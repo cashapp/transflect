@@ -42,6 +42,8 @@ spec:
             valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
           - name: LEASE_ID
             valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          - name: HTTP_PATH_PREFIX
+            value: /api
           livenessProbe:
             httpGet:
               path: /_liveness

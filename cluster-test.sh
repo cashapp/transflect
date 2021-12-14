@@ -21,9 +21,11 @@
 set -euo pipefail
 
 rguide_v1_url=http://127.0.0.1/api/rguide.RouteGuide/GetFeature
+rguide_v1_apiv2_url=http://127.0.0.1/api/v2/rguide.RouteGuide/GetFeature
 rguide_v2_url=http://127.0.0.1/api/rguide.RouteGuide/GetDefaultFeature
 rguide_v2=v0.0.4
 echo_url=http://127.0.0.1/api/echo/hello
+reflection_url=http://127.0.0.1/api/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo
 attempts=25
 
 main() {
@@ -35,6 +37,8 @@ main() {
     # Ensure EnvoyFilters are created as expected and expose HTTP/JSON endpoints
     ./out/test-http-transcoding --attempts "${attempts}" --url "${rguide_v1_url}" --host "routeguide.local"
     ./out/test-http-transcoding --attempts "${attempts}" --url "${echo_url}" --host "guppyecho.local"
+    ./out/test-http-transcoding --attempts "${attempts}" --url "${reflection_url}" --host "guppyecho.local" --body '[{"list_services": ""}]'
+    ./out/test-http-transcoding --attempts "${attempts}" --url "${reflection_url}" --host "routeguide.local" --body '[{"list_services": ""}]'
 
     # Ensure EnvoyFilter gets updated on Replicaset change
     # test routeguide v2 endpoint isn't present
@@ -42,6 +46,17 @@ main() {
     kubectl set image deployment/routeguide -n routeguide routeguide=julia/routeguide:"${rguide_v2}"
     ./out/test-http-transcoding --attempts 40 --url "${rguide_v1_url}" --host "routeguide.local" --dur 250ms --poll-until-error --error-threshold 3
     ./out/test-http-transcoding --attempts "${attempts}" --url "${rguide_v2_url}" --host "routeguide.local"
+
+    # Ensure services get excluded and included per annotation
+    # in both tests we disable the grpc server reflection service
+    kubectl annotate deployment guppyecho transflect.cash.squareup.com/exclude-grpc-services="grpc.reflection.v1alpha.ServerReflection" --overwrite -n guppyecho
+    kubectl annotate deployment routeguide transflect.cash.squareup.com/include-grpc-services="rguide.RouteGuide" --overwrite -n routeguide
+    ./out/test-http-transcoding --attempts "${attempts}" --url "${reflection_url}" --host "guppyecho.local" --body '[{"list_services": ""}]' --dur 1s --poll-until-error --error-threshold 3 && exit 1
+    ./out/test-http-transcoding --attempts "${attempts}" --url "${reflection_url}" --host "routeguide.local" --body '[{"list_services": ""}]' --dur 1s --poll-until-error --error-threshold 3 && exit 1
+
+    # Ensure http-path-prefix get updated /api => /api/v2
+    kubectl annotate deployment routeguide transflect.cash.squareup.com/http-path-prefix="/api/v2" --overwrite -n routeguide
+    ./out/test-http-transcoding --attempts "${attempts}" --url "${rguide_v1_apiv2_url}" --host "routeguide.local"
 
     # Ensure EnvoyFilter gets deleted when transflect/port annotation is invalidated on deployment
     kubectl get envoyfilter guppyecho-transflect -n guppyecho
@@ -72,7 +87,7 @@ check_metrics() {
     metrics_want='transflect_envoyfilters 1
 transflect_leader 1
 transflect_operations_total{status="success",type="delete"} 1
-transflect_operations_total{status="success",type="upsert"} 3
+transflect_operations_total{status="success",type="upsert"} 6
 transflect_preprocess_error_total 0'
     if [ "${metrics_want}" != "${metrics_got}" ]; then
         printf "unexpected metrics value\n want:\n%s\n\n got:\n%s\n" "${metrics_want}" "${metrics_got}"

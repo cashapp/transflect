@@ -31,9 +31,10 @@ type config struct {
 
 	HTTPPort uint32 `help:"Port to serve HTTP/JSON" default:"9999"  group:"Envoy:"`
 
-	App       string `help:"App used in Istio EnvoyFilter generation" group:"Istio:"`
-	Namespace string `help:"Namespace used in Istio EnvoyFilter generation" group:"Istio:"`
-	IstioPort uint32 `help:"Port to match in Istio EnvoyFilter generation" default:"8080"  group:"Istio:"`
+	App            string `help:"App used in Istio EnvoyFilter generation" group:"Istio:"`
+	Namespace      string `help:"Namespace used in Istio EnvoyFilter generation" group:"Istio:"`
+	IstioPort      uint32 `help:"Port to match in Istio EnvoyFilter generation" default:"8080"  group:"Istio:"`
+	HTTPPathPrefix string `help:"Default path prefix for grpc Methods that are not annotated; e.g. /api"`
 
 	LogFormat string           `help:"Log format ('json', 'std')" enum:"json,std" default:"std" group:"Other"`
 	Version   kong.VersionFlag `short:"V" help:"Print version information" group:"Other"`
@@ -81,7 +82,7 @@ func protosetFromReflection(cfg *config) (*descriptorpb.FileDescriptorSet, []str
 
 	ctx := context.Background()
 	addr := cfg.Address
-	fds, services, err := transflect.GetFileDescriptorSet(ctx, addr, opts...)
+	fds, services, err := transflect.GetFileDescriptorSet(ctx, addr, cfg.HTTPPathPrefix, opts...)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "cannot create file descriptor set")
 	}
