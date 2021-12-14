@@ -52,7 +52,11 @@ func (o *operator) upsertFilter(ctx context.Context, rs *appsv1.ReplicaSet) erro
 	}
 	addr, opts := o.getAddrOpts(rs)
 	ctx = context.WithValue(ctx, ctxReplicaKey, rs.Name)
-	fds, services, err := transflect.GetFileDescriptorSet(ctx, addr, opts...)
+	httpPathPrefix := rs.Annotations["transflect.cash.squareup.com/http-path-prefix"]
+	if httpPathPrefix == "" {
+		httpPathPrefix = o.httpPathPrefix
+	}
+	fds, services, err := transflect.GetFileDescriptorSet(ctx, addr, httpPathPrefix, opts...)
 	if err != nil {
 		return errors.Wrapf(err, "cannot query Reflection API or create FileDescriptor for address %s", o.address)
 	}
@@ -304,7 +308,7 @@ func newEnvoyFilter(rs *appsv1.ReplicaSet, protosetBase64 string, services []str
 			Annotations: map[string]string{
 				versionAnnotation:                   version,
 				replicasetAnnotation:                rs.Name,
-				deployementAnnotation:               deployKey,
+				deploymentAnnotation:                deployKey,
 				portAnnotation:                      rs.Annotations[portAnnotation],
 				"deployment.kubernetes.io/revision": rs.Annotations["deployment.kubernetes.io/revision"],
 			},

@@ -54,7 +54,7 @@ func (s *TransflectSuite) TearDownSuite() {
 func (s *TransflectSuite) TestProtoset() {
 	t := s.T()
 	ctx := context.Background()
-	fds, services, err := GetFileDescriptorSet(ctx, s.addr, grpc.WithInsecure())
+	fds, services, err := GetFileDescriptorSet(ctx, s.addr, "", grpc.WithInsecure())
 	require.NoError(t, err)
 	got := make([]string, len(fds.File))
 	for i, file := range fds.File {

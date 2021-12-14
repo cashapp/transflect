@@ -41,7 +41,7 @@ ENVOY_OUT = envoy/envoy.yaml
 run-envoy:
 	envoy -c $(ENVOY_OUT)
 
-GEN_ENVOY_CONFIG =  $(O)/transflect --plaintext --format envoy localhost:9090 $(ENVOY_OUT)
+GEN_ENVOY_CONFIG =  $(O)/transflect --plaintext --http-path-prefix="/api" --format envoy localhost:9090 $(ENVOY_OUT)
 envoy-config: build
 	$(GEN_ENVOY_CONFIG)
 
@@ -60,8 +60,9 @@ GEN_ISTIO_CONFIG = $(O)/transflect \
                         --format istio \
                         --app echo \
                         --namespace echo \
+                        --http-path-prefix="/api" \
                         localhost:9090 $(ISTIO_OUT)
-LOCAL_OPERATOR_CMD = $(O)/transflect-operator --plaintext --use-ingress --lease-namespace default --address localhost:80
+LOCAL_OPERATOR_CMD = $(O)/transflect-operator --plaintext --http-path-prefix="/api" --use-ingress --lease-namespace default --address localhost:80
 
 istio: istio-config istio-apply
 

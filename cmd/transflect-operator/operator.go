@@ -31,12 +31,13 @@ import (
 )
 
 const (
-	deployementAnnotation = "transflect.cash.squareup.com/deployment"
-	excludeAnnotation     = "transflect.cash.squareup.com/exclude-grpc-services"
-	includeAnnotation     = "transflect.cash.squareup.com/include-grpc-services"
-	portAnnotation        = "transflect.cash.squareup.com/port"
-	replicasetAnnotation  = "transflect.cash.squareup.com/replicaset"
-	versionAnnotation     = "transflect.cash.squareup.com/version"
+	deploymentAnnotation = "transflect.cash.squareup.com/deployment"
+	excludeAnnotation    = "transflect.cash.squareup.com/exclude-grpc-services"
+	httpPrefixAnnotation = "transflect.cash.squareup.com/http-path-prefix"
+	includeAnnotation    = "transflect.cash.squareup.com/include-grpc-services"
+	portAnnotation       = "transflect.cash.squareup.com/port"
+	replicasetAnnotation = "transflect.cash.squareup.com/replicaset"
+	versionAnnotation    = "transflect.cash.squareup.com/version"
 )
 
 type operator struct {
@@ -65,6 +66,7 @@ type operator struct {
 	version        string
 	leaseNamespace string
 	leaseID        string
+	httpPathPrefix string
 }
 
 type activeEntry struct {
@@ -73,6 +75,7 @@ type activeEntry struct {
 	grpcPort        uint32
 	excludeServices string
 	includeServices string
+	httpPathPrefix  string
 }
 
 func newOperator(cfg *config) (*operator, error) {
@@ -95,6 +98,7 @@ func newOperator(cfg *config) (*operator, error) {
 		version:        "transflect-" + version,
 		leaseNamespace: cfg.LeaseNamespace,
 		leaseID:        leaseID,
+		httpPathPrefix: cfg.HTTPPathPrefix,
 	}
 	return op, nil
 }
@@ -478,7 +482,7 @@ func (o *operator) syncActive(ctx context.Context) error {
 
 func getActiveEntry(filter istionet.EnvoyFilter) (string, activeEntry, error) {
 	a := filter.Annotations
-	key := a[deployementAnnotation]
+	key := a[deploymentAnnotation]
 	if key == "" {
 		return "", activeEntry{}, fmt.Errorf("cannot retrieve deployment key from existing EnvoyFilter")
 	}
@@ -515,5 +519,6 @@ func newActiveEntry(rs *appsv1.ReplicaSet) activeEntry {
 		revision:        deployRevision(rs),
 		excludeServices: rs.Annotations[excludeAnnotation],
 		includeServices: rs.Annotations[includeAnnotation],
+		httpPathPrefix:  rs.Annotations[httpPrefixAnnotation],
 	}
 }
